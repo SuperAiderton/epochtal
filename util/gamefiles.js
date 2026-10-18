@@ -88,13 +88,17 @@ async function getMap (mapid) {
   // Download map to tmp path
   const output = (await tmppath()) + ".bsp";
 
-  const request = await fetch(data.file_url);
+  // Route download through Epochtal's API to unzip potentially compressed maps
+  const ugcid = data.file_url.slice("/ugc/")[1].split("/");
+  const downloadURL = `${CONFIG.USE_HTTPS ? "https" : "http"}://${CONFIG.WEB_URL}/api/workshopper/ugc/"${ugcid[0]}"/"${ugcid[1]}"`;
+
+  const request = await fetch(downloadURL);
   if (request.status !== 200) throw "ERR_STEAMAPI";
 
   // Causes a memory leak
   // await Bun.write(output, request);
 
-  await $`wget ${data.file_url} -O ${output}`.quiet();
+  await $`wget ${downloadURL} -O ${output}`.quiet();
   return { output, workshop, bsp };
 
 }

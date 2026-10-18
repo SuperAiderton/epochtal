@@ -48,9 +48,13 @@ async function downloadBSPLumps (data, lumpIndices) {
   if (data.file_url === undefined) return "ERR_BADMAP";
   if (data.consumer_appid !== 620) return "ERR_BADMAP";
 
+  // Route download through Epochtal's API to unzip potentially compressed maps
+  const ugcid = data.file_url.split("/ugc/")[1].split("/");
+  const downloadURL = `${CONFIG.USE_HTTPS ? "https" : "http"}://${CONFIG.WEB_URL}/api/workshopper/ugc/"${ugcid[0]}"/"${ugcid[1]}"`;
+
   // Fetch the BSP file for the map and extract the requested lumps
   return await (new Promise(function (resolve, _reject) {
-    https.request(data.file_url, function (response) {
+    https.request(downloadURL, function (response) {
 
       if (response.statusCode !== 200) {
         resolve("ERR_STEAMAPI");

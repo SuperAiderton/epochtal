@@ -3,6 +3,8 @@ const curator = require("../util/curator.js");
 const api_users = require("./users.js");
 const {CONFIG} = require("../config.ts");
 
+const unzipper = require("unzipper");
+
 /**
  * Handles `/api/workshopper/` endpoint requests. This endpoint supports only the `suggest` command:
  *
@@ -68,6 +70,35 @@ module.exports = async function (args, request) {
     case "randomsource": {
       const source = args[1];
       return randomMapSources[source];
+    }
+
+    case "ugc": {
+      const ids = args.slice(1);
+      const link = `https://cdn.steamusercontent.com/ugc/${ids[0]}/${ids[1]}/compressed`;
+
+      let response;
+      try {
+        response = await fetch(link);
+      } catch (_) {
+        return new Response("ERR_STEAMAPI (1)", { status: 500 });
+      }
+      if (response.status !== 200) {
+        return new Response("ERR_STEAMAPI (2)", { status: 500 });
+      }
+
+      const contentDisposition = response.headers.get("content-disposition");
+      if (!contentDisposition) {
+        return new Response("ERR_STEAMAPI (3)", { status: 500 });
+      }
+
+      const isZipped = contentDisposition.endsWith(".bsp.zip;");
+      if (!isZipped) {
+        return response;
+      }
+
+      const buffer = await response.bytes();
+      const directory = await unzipper.Open.buffer(buffer);
+      return new Response(directory.files[0].stream());
     }
 
   }
