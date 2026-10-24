@@ -758,11 +758,12 @@ function findAllReachableBlocks (startLocation, occupiedLocations, bounds, isSta
 
   // Adjacent non-obstructed blocks are in the same region, so the search can take a step in one axis direction
   const deltas = [[128, 0, 0], [-128, 0, 0], [0, 128, 0], [0, -128, 0], [0, 0, 128], [0, 0, -128]];
-  // If the player starts in this region, then even if another block can only be reached by a step in 2 axis directions
-  // at once, light, darkness, gel, or the appearance of a texture can seep through the shared edge to alert the player
-  // that there is a non-obstructed block on the other side. With that knowledge, the player may be able to portal bump
-  // straight there using the floor or the ceiling, or get there via e.g. mid-portal teleportation, spinning PPD, NaN
-  // bounce. So the search can step in two axis directions at once if this is the start region.
+  // If the player starts in this region, then even if another block can only be reached by a step in 2 axis
+  // directions at once, light, darkness or gel can seep through the shared edge (or something on the other
+  // side can just be slightly visible) to alert the player that there is a non-obstructed block on the other
+  // side. With that knowledge, the player may be able to portal bump straight there using the floor or the
+  // ceiling, or get there via e.g. mid-portal teleportation, spinning PPD, NaN bounce. So the search can step
+  // in two axis directions at once if this is the start region.
   if (isStartRegion) deltas.push(
     [128, 128, 0], [128, -128, 0], [-128, 128, 0], [-128, -128, 0],
     [128, 0, 128], [128, 0, -128], [-128, 0, 128], [-128, 0, -128],
@@ -1687,8 +1688,11 @@ async function isMapSolvable (data, context = epochtal) {
 
 
   // If it's cooperative mode and something that is connected to the exit door is triggerable
-  // via player position, it can be stuck by Orange several times in order to unlock the door,
-  // regardless of what else is connected to the door
+  // via player position, it can be stuck by Orange once and then can still be activated again
+  // in order to unlock the door. This means that any one condition that unlocks the exit door
+  // may be skipped, so the map should only be declared unsolvable if there are at least two
+  // unachievable conditions.
+  let oneConditionCanBeSkipped = false;
   if (isCoop) {
     for (const entity of entitiesThatUnlockExitDoor) {
       if (!canStartInputOutputChain(entity, entitiesThatArePermanentlyDisabled)) continue;
@@ -1696,11 +1700,11 @@ async function isMapSolvable (data, context = epochtal) {
       // stuck via player position if it's a floor button in the region reachable by players
       if (criticalEntities.includes(entity)) {
         if (entity.classname === "prop_floor_button" && entranceRegionNumbers.has(regionByCriticalEntity.get(entity)))
-          return true;
+          oneConditionCanBeSkipped = true;
       }
       // If it's not a standard PeTI entity that can connect to the exit door, assume it can
       // be stuck via player position
-      else return true;
+      else oneConditionCanBeSkipped = true;
     }
   }
 
@@ -1721,7 +1725,7 @@ async function isMapSolvable (data, context = epochtal) {
 
   for (let regionNumber = 0; regionNumber < numRegions; regionNumber++) {
 
-    let hasExitPedestalButton = false;
+    let numExitPedestalButtons = 0;
     let hasCubeDropperThatCanDrop = false, hasSphereDropperThatCanDrop = false;
     let cubeCount = 0, sphereCount = 0;
     // Each of these maps a block to the set of orientations that have a button within
@@ -1768,7 +1772,7 @@ async function isMapSolvable (data, context = epochtal) {
         }
 
         else if (entity.classname === "prop_button") { // Pedestal button
-          hasExitPedestalButton = true;
+          numExitPedestalButtons += 1;
         }
 
         else if (entity.classname === "prop_laser_catcher" || entity.classname === "prop_laser_relay") { // Laser catcher or relay
@@ -1858,8 +1862,14 @@ async function isMapSolvable (data, context = epochtal) {
     // --------------------------------------------------------------------------------------------------------------- //
 
     // The exit requires pressing a pedestal button in this region but this region is unreachable
-    if (hasExitPedestalButton && !entranceRegionNumbers.has(regionNumber)) {
-      return solvabilityGivenClosedExitDoorCannotBeOpened(isStandardUnskippableExit);
+    if (!entranceRegionNumbers.has(regionNumber)) {
+      while (numExitPedestalButtons > 0) {
+        if (oneConditionCanBeSkipped) {
+          oneConditionCanBeSkipped = false;
+          numExitPedestalButtons -= 1;
+        }
+        else return solvabilityGivenClosedExitDoorCannotBeOpened(isStandardUnskippableExit);
+      }
     }
 
     // Each block can have up to 6 buttons that are required for the exit, and multiple can be
@@ -1901,13 +1911,25 @@ async function isMapSolvable (data, context = epochtal) {
     }
 
     // No cube dropper and not enough cubes to satisfy required cube buttons
-    if (!hasCubeDropperThatCanDrop && cubeCount < wholeRegionCubesRequired) {
-      return solvabilityGivenClosedExitDoorCannotBeOpened(isStandardUnskippableExit);
+    if (!hasCubeDropperThatCanDrop) {
+      while (cubeCount < wholeRegionCubesRequired) {
+        if (oneConditionCanBeSkipped) {
+          oneConditionCanBeSkipped = false;
+          wholeRegionCubesRequired -= 1;
+        }
+        else return solvabilityGivenClosedExitDoorCannotBeOpened(isStandardUnskippableExit);
+      }
     }
 
     // No sphere dropper and not enough spheres to satisfy required sphere buttons
-    if (!hasSphereDropperThatCanDrop && sphereCount < wholeRegionSpheresRequired) {
-      return solvabilityGivenClosedExitDoorCannotBeOpened(isStandardUnskippableExit);
+    if (!hasSphereDropperThatCanDrop) {
+      while (sphereCount < wholeRegionSpheresRequired) {
+        if (oneConditionCanBeSkipped) {
+          oneConditionCanBeSkipped = false;
+          wholeRegionSpheresRequired -= 1;
+        }
+        else return solvabilityGivenClosedExitDoorCannotBeOpened(isStandardUnskippableExit);
+      }
     }
 
     // If there are no cube droppers or sphere droppers,
@@ -1919,32 +1941,44 @@ async function isMapSolvable (data, context = epochtal) {
     if (!hasCubeDropperThatCanDrop && !hasSphereDropperThatCanDrop) {
       const availableCubes = cubeCount - wholeRegionCubesRequired;
       const availableSpheres = sphereCount - wholeRegionSpheresRequired;
-      const remainingToBeStuck = Math.max(0, wholeRegionAnythingRequired - availableCubes - availableSpheres);
+      let remainingToBeStuck = Math.max(0, wholeRegionAnythingRequired - availableCubes - availableSpheres);
 
       let numPossibleSticks;
       // If this is the region reachable by the player, then after all cubes and spheres have been placed on as
       // many buttons as possible, the player can perform button sticks on additional buttons in this region to
       // open the exit door
       if (entranceRegionNumbers.has(regionNumber)) {
-        // If it's singleplayer mode (without SLA):
-        //   No more than one stick can be performed to open the exit door after all cubes and spheres have been
-        //   placed on as many buttons as possible.
-        //   If it's a standard PeTI map that has exit door logic from early days of the workshop, the exit door
-        //   cannot be stuck open at all.
-        // If it's cooperative mode:
-        //   Maps with buttons targeting the exit door that can be stuck by the player have already been handled.
-        if (!isBEEmodMap && !entities.some(e => e.targetname === "@door_wants_close"))
+        // In singleplayer:
+        //   Without SLA, no more than one stick can be performed to open the exit door given that
+        //   all cubes and spheres have already been placed on as many buttons as possible.
+        // In cooperative mode:
+        //   Button sticks in cooperative mode have already been considered (they allow any one condition to be
+        //   skipped).
+        //   Additionally, one floor button (regardless of whether it has already been used for a stick) can be
+        //   activated by a player standing on it, allowing the other player to pass through the exit door, and
+        //   this keeps the exit door open for the player who was standing on the button. This usage of a floor
+        //   button is treated as a 'possible stick' in this part of the code, so one stick is considered to be
+        //   possible in cooperative mode as well as singleplayer.
+        // If it's a standard PeTI map that has exit door logic from early days of the workshop, the exit door
+        // cannot be stuck open at all (this only affects singleplayer).
+        if (!isCoop && !isBEEmodMap && !entities.some(e => e.targetname === "@door_wants_close"))
           numPossibleSticks = 0;
         else numPossibleSticks = 1;
       }
-      // If this is not the region reachable by the player, then no button sticks in this region can open the exit
-      // door after all cubes and spheres have been placed on as many buttons as possible
+      // If this is not the region reachable by the player, then no button sticks in this region can open the
+      // exit door after all cubes and spheres have been placed on as many buttons as possible
       else numPossibleSticks = 0;
 
-      // If not enough button sticks can be performed to satisfy the remaining required buttons in this region, the
-      // exit door cannot be opened
-      if (!exitInvolvesPermanentActivation && remainingToBeStuck > numPossibleSticks) {
-        return solvabilityGivenClosedExitDoorCannotBeOpened(isStandardUnskippableExit);
+      // If not enough button sticks can be performed to satisfy the remaining required floor buttons in this
+      // region, the exit door cannot be opened
+      if (!exitInvolvesPermanentActivation) {
+        while (numPossibleSticks < remainingToBeStuck) {
+          if (oneConditionCanBeSkipped) {
+            oneConditionCanBeSkipped = false;
+            remainingToBeStuck -= 1;
+          }
+          else return solvabilityGivenClosedExitDoorCannotBeOpened(isStandardUnskippableExit);
+        }
       }
     }
   }
@@ -1960,11 +1994,12 @@ async function isMapSolvable (data, context = epochtal) {
   // This will find all regions that can have an enabled laser.
 
   // If some region has a laser receiver that connects to the exit door but can never have an
-  // enabled laser emitter, then the map is unsolvable... unless some region with a reflector cube
-  // can have an enabled laser emitter - there is a chance the map may, without the player having to
-  // touch the cube directly, make the cube point against a solid wall, causing the laser to pass
-  // through one brush and enter another nearby region. This could make the map solvable without the
-  // player needing to know the location of any separate region, so flag the map for manual review.
+  // enabled laser emitter, then that exit condition can never be satisfied... unless some region
+  // with a reflector cube can have an enabled laser emitter - in that case, there is a chance the
+  // map may, without the player having to touch the cube directly, make the cube point against a
+  // solid wall, causing the laser to pass through one brush and enter another nearby region. This
+  // could make the map solvable without the player needing to know the location of any separate
+  // region, so flag the map for manual review.
 
   const visited = new Array(numRegions).fill(false);
   for (const r of regionsThatCouldBeFirstToActivateLaser) visited[r] = true;
@@ -1987,12 +2022,17 @@ async function isMapSolvable (data, context = epochtal) {
       }
     }
   }
-  if (regionsWithExitLaserCatcherOrRelay.some(region => !visited[region])) {
-    if (activatedSomeLaserInRegionWithReflectorCube) {
-      flagForManualReview("Sequence of laser activations requires reflector cube sending laser from one region to another");
-      return true;
+  for (const region of regionsWithExitLaserCatcherOrRelay) {
+    if (!visited[region]) {
+      if (oneConditionCanBeSkipped) oneConditionCanBeSkipped = false;
+      else {
+        if (activatedSomeLaserInRegionWithReflectorCube) {
+          flagForManualReview("Sequence of laser activations requires reflector cube sending laser from one region to another");
+          return true;
+        }
+        return solvabilityGivenClosedExitDoorCannotBeOpened(isStandardUnskippableExit);
+      }
     }
-    return solvabilityGivenClosedExitDoorCannotBeOpened(isStandardUnskippableExit);
   }
 
   return true;
