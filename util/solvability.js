@@ -1711,7 +1711,7 @@ async function isMapSolvable (data, context = epochtal) {
 
 
   // Data for the whole map, collected across all regions
-  const regionsWithExitLaserCatcherOrRelay = [];
+  const exitLaserCatchersOrRelaysByRegion = new Array(numRegions).fill(0);
   const regionsThatCouldBeFirstToActivateLaser = [];
   const regionsWithLasersActivatedByReceiverInGivenRegion = Array.from({ length: numRegions }, () => new Set());
   const containsReflectorCubeByRegion = new Array(numRegions).fill(false);
@@ -1738,7 +1738,6 @@ async function isMapSolvable (data, context = epochtal) {
       map.set(key, set);
     }
 
-    let hasExitLaserCatcherOrRelay = false;
     const lasers = new Set();
 
     // --------------------------------------------------------------------------------------------------------------- //
@@ -1776,7 +1775,7 @@ async function isMapSolvable (data, context = epochtal) {
         }
 
         else if (entity.classname === "prop_laser_catcher" || entity.classname === "prop_laser_relay") { // Laser catcher or relay
-          hasExitLaserCatcherOrRelay = true;
+          exitLaserCatchersOrRelaysByRegion[regionNumber] += 1;
         }
       }
 
@@ -1844,8 +1843,6 @@ async function isMapSolvable (data, context = epochtal) {
         }
       }
     }
-
-    if (hasExitLaserCatcherOrRelay) regionsWithExitLaserCatcherOrRelay.push(regionNumber);
 
     // Check whether this region has a laser that can activate before any other laser in the entire map
     // (meaning either it starts on or it can be activated without the requirement of another laser).
@@ -2022,9 +2019,10 @@ async function isMapSolvable (data, context = epochtal) {
       }
     }
   }
-  for (const region of regionsWithExitLaserCatcherOrRelay) {
-    if (!visited[region]) {
-      if (oneConditionCanBeSkipped) oneConditionCanBeSkipped = false;
+  for (let regionNumber = 0; regionNumber < numRegions; regionNumber++) {
+    if (exitLaserCatchersOrRelaysByRegion[regionNumber] > 0 && !visited[regionNumber]) {
+      if (oneConditionCanBeSkipped && exitLaserCatchersOrRelaysByRegion[regionNumber] === 1)
+        oneConditionCanBeSkipped = false;
       else {
         if (activatedSomeLaserInRegionWithReflectorCube) {
           flagForManualReview("Sequence of laser activations requires reflector cube sending laser from one region to another");
